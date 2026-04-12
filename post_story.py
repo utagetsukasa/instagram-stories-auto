@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import time
 import requests
 import jpholiday
@@ -32,6 +33,13 @@ def get_today_image():
     return day_map[today.weekday()]
 
 
+def raise_for_status_with_body(response):
+    """raise_for_status と同様だが、エラー時にレスポンス本文も表示する。"""
+    if not response.ok:
+        print(f"[ERROR] HTTP {response.status_code}: {response.text}", file=sys.stderr)
+        response.raise_for_status()
+
+
 def post_image_story(image_filename, user_id, access_token, repo):
     image_url = f"https://raw.githubusercontent.com/{repo}/main/{image_filename}"
     create_url = f"https://graph.instagram.com/v21.0/{user_id}/media"
@@ -40,9 +48,11 @@ def post_image_story(image_filename, user_id, access_token, repo):
         "media_type": "STORIES",
         "access_token": access_token,
     }
+    print(f"[DEBUG] メディアコンテナ作成中: {image_url}")
     response = requests.post(create_url, params=create_params)
-    response.raise_for_status()
+    raise_for_status_with_body(response)
     creation_id = response.json()["id"]
+    print(f"[DEBUG] コンテナ作成完了: creation_id={creation_id}")
 
     publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
     publish_params = {
@@ -50,7 +60,7 @@ def post_image_story(image_filename, user_id, access_token, repo):
         "access_token": access_token,
     }
     response = requests.post(publish_url, params=publish_params)
-    response.raise_for_status()
+    raise_for_status_with_body(response)
     print(f"投稿完了（画像）: {image_filename}")
 
 
@@ -62,9 +72,11 @@ def post_video_story(video_filename, user_id, access_token, repo):
         "media_type": "STORIES",
         "access_token": access_token,
     }
+    print(f"[DEBUG] 動画コンテナ作成中: {video_url}")
     response = requests.post(create_url, params=create_params)
-    response.raise_for_status()
+    raise_for_status_with_body(response)
     creation_id = response.json()["id"]
+    print(f"[DEBUG] コンテナ作成完了: creation_id={creation_id}")
 
     # 動画の処理完了を待機
     for attempt in range(12):
@@ -74,7 +86,7 @@ def post_video_story(video_filename, user_id, access_token, repo):
             "access_token": access_token,
         }
         status_resp = requests.get(status_url, params=status_params)
-        status_resp.raise_for_status()
+        raise_for_status_with_body(status_resp)
         status_code = status_resp.json().get("status_code")
         if status_code == "FINISHED":
             break
@@ -91,14 +103,28 @@ def post_video_story(video_filename, user_id, access_token, repo):
         "access_token": access_token,
     }
     response = requests.post(publish_url, params=publish_params)
-    response.raise_for_status()
+    raise_for_status_with_body(response)
     print(f"投稿完了（動画）: {video_filename}")
 
 
 if __name__ == "__main__":
-    user_id = os.environ["INSTAGRAM_USER_ID"]
-    access_token = os.environ["INSTAGRAM_ACCESS_TOKEN"]
-    repo = os.environ["GITHUB_REPOSITORY"]
+    user_id = os.environ.get("INSTAGRAM_USER_ID", "")
+    access_token = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+
+    missing = [name for name, val in [
+        ("INSTAGRAM_USER_ID", user_id),
+        ("INSTAGRAM_ACCESS_TOKEN", access_token),
+        ("GITHUB_REPOSITORY", repo),
+    ] if not val]
+    if missing:
+        print(f"[ERROR] 必須の環境変数が設定されていません: {', '.join(missing)}", file=sys.stderr)
+        print("リポジトリの Settings > Secrets and variables > Actions で", file=sys.stderr)
+        print("INSTAGRAM_USER_ID と INSTAGRAM_ACCESS_TOKEN を登録してください。", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[DEBUG] GITHUB_REPOSITORY={repo}")
+    print(f"[DEBUG] INSTAGRAM_USER_ID={user_id}")
 
     today = date.today()
     closures = load_closures()
