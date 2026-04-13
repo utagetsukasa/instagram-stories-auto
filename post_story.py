@@ -54,6 +54,25 @@ def post_image_story(image_filename, user_id, access_token, repo):
     creation_id = response.json()["id"]
     print(f"[DEBUG] コンテナ作成完了: creation_id={creation_id}")
 
+    # 画像の処理完了を待機
+    for attempt in range(12):
+        status_url = f"https://graph.instagram.com/v21.0/{creation_id}"
+        status_params = {
+            "fields": "status_code",
+            "access_token": access_token,
+        }
+        status_resp = requests.get(status_url, params=status_params)
+        raise_for_status_with_body(status_resp)
+        status_code = status_resp.json().get("status_code")
+        if status_code == "FINISHED":
+            break
+        elif status_code == "ERROR":
+            raise RuntimeError(f"画像処理エラー: {image_filename}")
+        print(f"画像処理中... ({attempt + 1}/12)")
+        time.sleep(10)
+    else:
+        raise TimeoutError(f"画像処理タイムアウト: {image_filename}")
+
     publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
     publish_params = {
         "creation_id": creation_id,
