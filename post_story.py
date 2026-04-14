@@ -126,6 +126,19 @@ def post_video_story(video_filename, user_id, access_token, repo):
     print(f"投稿完了（動画）: {video_filename}")
 
 
+def already_posted_today(user_id, access_token):
+    """今日すでにストーリーズを投稿済みか確認する。"""
+    url = f"https://graph.instagram.com/v21.0/{user_id}/stories"
+    params = {"access_token": access_token}
+    response = requests.get(url, params=params)
+    if not response.ok:
+        # ストーリーズ取得に失敗した場合は投稿未済として扱う
+        print(f"[WARNING] ストーリーズ確認に失敗: {response.text}")
+        return False
+    stories = response.json().get("data", [])
+    return len(stories) > 0
+
+
 if __name__ == "__main__":
     user_id = os.environ.get("INSTAGRAM_USER_ID", "")
     access_token = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
@@ -144,6 +157,11 @@ if __name__ == "__main__":
 
     print(f"[DEBUG] GITHUB_REPOSITORY={repo}")
     print(f"[DEBUG] INSTAGRAM_USER_ID={user_id}")
+
+    # 本日すでに投稿済みの場合はスキップ（二重投稿防止）
+    if already_posted_today(user_id, access_token):
+        print("本日はすでに投稿済みです。スキップします。")
+        sys.exit(0)
 
     today = date.today()
     closures = load_closures()

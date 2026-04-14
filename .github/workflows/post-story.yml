@@ -2,7 +2,7 @@ name: Post Instagram Story
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # 毎日 07:00 JST（UTC+9）
+    - cron: '0 23 * * *'  # バックアップ: 毎日 08:00 JST（cron-job.orgが失敗した場合の保険）
   workflow_dispatch:  # 手動実行（テスト用）
 
 jobs:
