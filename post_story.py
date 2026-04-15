@@ -4,7 +4,7 @@ import sys
 import time
 import requests
 import jpholiday
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 CLOSURES_FILE = "closures.json"
 
@@ -127,16 +127,26 @@ def post_video_story(video_filename, user_id, access_token, repo):
 
 
 def already_posted_today(user_id, access_token):
-    """今日すでにストーリーズを投稿済みか確認する。"""
+    """今日（JST）すでにストーリーズを投稿済みか確認する。"""
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.now(JST).date()
+
     url = f"https://graph.instagram.com/v21.0/{user_id}/stories"
-    params = {"access_token": access_token}
+    params = {"fields": "timestamp", "access_token": access_token}
     response = requests.get(url, params=params)
     if not response.ok:
         # ストーリーズ取得に失敗した場合は投稿未済として扱う
         print(f"[WARNING] ストーリーズ確認に失敗: {response.text}")
         return False
     stories = response.json().get("data", [])
-    return len(stories) > 0
+    for story in stories:
+        ts = story.get("timestamp")
+        if ts:
+            story_date = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(JST).date()
+            if story_date == today_jst:
+                print(f"[DEBUG] 本日投稿済みのストーリーを検出: {ts}")
+                return True
+    return False
 
 
 if __name__ == "__main__":
