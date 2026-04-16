@@ -18,7 +18,8 @@ def load_closures():
 
 
 def get_today_image():
-    today = date.today()
+    JST = timezone(timedelta(hours=9))
+    today = datetime.now(JST).date()
     if jpholiday.is_holiday(today):
         return "holiday.png"
     day_map = {
