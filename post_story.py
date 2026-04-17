@@ -174,7 +174,8 @@ if __name__ == "__main__":
         print("本日はすでに投稿済みです。スキップします。")
         sys.exit(0)
 
-    today = date.today()
+    JST = timezone(timedelta(hours=9))
+    today = datetime.now(JST).date()
     closures = load_closures()
 
     if today in closures:
