@@ -18,7 +18,8 @@ def load_closures():
 
 
 def get_today_image():
-    today = date.today()
+    JST = timezone(timedelta(hours=9))
+    today = datetime.now(JST).date()
     if jpholiday.is_holiday(today):
         return "holiday.png"
     day_map = {
@@ -173,7 +174,8 @@ if __name__ == "__main__":
         print("本日はすでに投稿済みです。スキップします。")
         sys.exit(0)
 
-    today = date.today()
+    JST = timezone(timedelta(hours=9))
+    today = datetime.now(JST).date()
     closures = load_closures()
 
     if today in closures:
