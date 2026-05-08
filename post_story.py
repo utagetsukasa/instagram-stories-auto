@@ -7,6 +7,7 @@ import jpholiday
 from datetime import date, datetime, timedelta, timezone
 
 CLOSURES_FILE = "closures.json"
+ANNOUNCEMENTS_FILE = "announcements.json"
 
 
 def load_closures():
@@ -15,6 +16,21 @@ def load_closures():
     with open(CLOSURES_FILE, "r") as f:
         data = json.load(f)
     return [date.fromisoformat(d) for d in data.get("closures", [])]
+
+
+def load_announcements_for(target_date):
+    """target_date が start〜end 範囲内の announcement を返す（両端含む）"""
+    if not os.path.exists(ANNOUNCEMENTS_FILE):
+        return []
+    with open(ANNOUNCEMENTS_FILE, "r") as f:
+        data = json.load(f)
+    result = []
+    for ann in data.get("announcements", []):
+        start = date.fromisoformat(ann["start"])
+        end = date.fromisoformat(ann["end"])
+        if start <= target_date <= end:
+            result.append(ann)
+    return result
 
 
 def get_today_image():
@@ -127,27 +143,34 @@ def post_video_story(video_filename, user_id, access_token, repo):
     print(f"投稿完了（動画）: {video_filename}")
 
 
-def already_posted_today(user_id, access_token):
-    """今日（JST）すでにストーリーズを投稿済みか確認する。"""
+def get_today_posted_media_types(user_id, access_token):
+    """本日（JST）投稿済みストーリーの media_type を投稿順に返す（["IMAGE", "VIDEO", ...]）。
+
+    cron-job.org（07:00）と GitHub Actions schedule（08:00）の二重起動時に、
+    投稿予定のメディア構成（画像N本・動画M本）と突き合わせて未済分のみ補完投稿するために使う。
+    """
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.now(JST).date()
 
     url = f"https://graph.instagram.com/v21.0/{user_id}/stories"
-    params = {"fields": "timestamp", "access_token": access_token}
+    params = {"fields": "timestamp,media_type", "access_token": access_token}
     response = requests.get(url, params=params)
     if not response.ok:
-        # ストーリーズ取得に失敗した場合は投稿未済として扱う
+        # 取得失敗時は「投稿済みなし」として扱う（本日未済前提で投稿）
         print(f"[WARNING] ストーリーズ確認に失敗: {response.text}")
-        return False
+        return []
     stories = response.json().get("data", [])
+    posted = []
     for story in stories:
         ts = story.get("timestamp")
-        if ts:
+        mt = story.get("media_type")
+        if ts and mt:
             story_date = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(JST).date()
             if story_date == today_jst:
-                print(f"[DEBUG] 本日投稿済みのストーリーを検出: {ts}")
-                return True
-    return False
+                posted.append(mt)
+    if posted:
+        print(f"[DEBUG] 本日投稿済みメディア: {posted}")
+    return posted
 
 
 if __name__ == "__main__":
@@ -169,29 +192,50 @@ if __name__ == "__main__":
     print(f"[DEBUG] GITHUB_REPOSITORY={repo}")
     print(f"[DEBUG] INSTAGRAM_USER_ID={user_id}")
 
-    # 本日すでに投稿済みの場合はスキップ（二重投稿防止）
-    if already_posted_today(user_id, access_token):
-        print("本日はすでに投稿済みです。スキップします。")
-        sys.exit(0)
-
     JST = timezone(timedelta(hours=9))
     today = datetime.now(JST).date()
     closures = load_closures()
+    announcements = load_announcements_for(today)
 
+    # 本日の投稿予定リストを構築（順序が再実行時のスキップ判定にも使われる）
+    plan = []  # [(media_type, filename), ...]
     if today in closures:
-        # 臨時休診日: 動画のみ投稿
-        print("本日は臨時休診日です。動画のみ投稿します。")
-        post_video_story("closure-video.mp4", user_id, access_token, repo)
+        # 臨時休診日: 動画のみ
+        plan.append(("VIDEO", "closure-video.mp4"))
     else:
-        # 通常日または祝日: 曜日・祝日画像を投稿
-        image = get_today_image()
-        print(f"本日の画像: {image}")
-        post_image_story(image, user_id, access_token, repo)
-
-        # 7日以内に休診日がある場合は予告動画も投稿
+        # 通常日・祝日: 曜日/祝日画像
+        plan.append(("IMAGE", get_today_image()))
+        # 7日以内に休診日がある場合は予告動画
         for days_ahead in range(1, 8):
             upcoming = today + timedelta(days=days_ahead)
             if upcoming in closures:
-                print(f"臨時休診日（{upcoming}）まで{days_ahead}日：予告動画を投稿します。")
-                post_video_story("closure-video.mp4", user_id, access_token, repo)
+                plan.append(("VIDEO", "closure-video.mp4"))
                 break
+        # 期間限定告知動画（複数あれば全部）
+        for ann in announcements:
+            plan.append(("VIDEO", ann["video"]))
+
+    print(f"[DEBUG] 本日の投稿予定: {plan}")
+
+    # 投稿済みメディア種別を取得（cron→Actions再実行時の二重投稿防止）
+    posted = get_today_posted_media_types(user_id, access_token)
+    posted_image_count = posted.count("IMAGE")
+    posted_video_count = posted.count("VIDEO")
+
+    image_skipped = 0
+    video_skipped = 0
+    for media_type, filename in plan:
+        if media_type == "IMAGE":
+            if image_skipped < posted_image_count:
+                image_skipped += 1
+                print(f"[SKIP] {filename}（画像は本日投稿済み）")
+                continue
+            print(f"本日の画像: {filename}")
+            post_image_story(filename, user_id, access_token, repo)
+        else:  # VIDEO
+            if video_skipped < posted_video_count:
+                video_skipped += 1
+                print(f"[SKIP] {filename}（動画{video_skipped}本目は本日投稿済み）")
+                continue
+            print(f"動画投稿: {filename}")
+            post_video_story(filename, user_id, access_token, repo)
