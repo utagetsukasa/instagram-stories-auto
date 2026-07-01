@@ -1,0 +1,29 @@
+name: Keepalive
+
+# 目的: リポジトリに定期的な "人の操作扱い" のコミットを入れ続けることで、
+# GitHub の「60日間アクティビティが無いと scheduled workflow を自動無効化」ルールを回避する。
+# これにより post-story / refresh-token / monthly-plan が勝手に止まらなくなる。
+# ポイント: GITHUB_TOKEN での自動コミットは無効化タイマーをリセットしないため、
+# 個人アクセストークン GH_PAT を使って push する。
+
+on:
+  schedule:
+    - cron: '0 21 1,15 * *'  # 毎月 1日・15日 06:00 JST（UTC+9）
+  workflow_dispatch:  # 手動実行（テスト用）
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          token: ${{ secrets.GH_PAT }}  # PATで認証 → push が "人の操作扱い" になりタイマーがリセットされる
+
+      - name: Update keepalive marker and push
+        run: |
+          git config user.name "utagetsukasa"
+          git config user.email "utagetsukasa@users.noreply.github.com"
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive
+          git add .keepalive
+          git commit -m "chore: keepalive $(date -u +%Y-%m-%d)" || { echo "変更なし・スキップ"; exit 0; }
+          git push
