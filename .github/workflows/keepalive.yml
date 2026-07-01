@@ -7,8 +7,12 @@ name: Keepalive
 # 個人アクセストークン GH_PAT を使って push する。
 
 on:
-  schedule:
-    - cron: '0 21 1,15 * *'  # 毎月 1日・15日 06:00 JST（UTC+9）
+  # ⚠️ schedule 一時停止中（2026-07-01）:
+  # 既存の GH_PAT に Contents(write) 権限が無く push できず自動実行が失敗するため。
+  # push 権限のある鍵（GH_PAT に Contents:write 追加、または専用PATを別secretで用意）を
+  # 整えたら、下の schedule のコメントを外して自動キープアライブを復活させる。
+  # schedule:
+  #   - cron: '0 21 1,15 * *'  # 毎月 1日・15日 06:00 JST（UTC+9）
   workflow_dispatch:  # 手動実行（テスト用）
 
 jobs:
