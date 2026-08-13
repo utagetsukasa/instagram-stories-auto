@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 
 CLOSURES_FILE = "closures.json"
 ANNOUNCEMENTS_FILE = "announcements.json"
+NO_POST_FILE = "no_post_dates.json"
 
 
 def load_closures():
@@ -16,6 +17,19 @@ def load_closures():
     with open(CLOSURES_FILE, "r") as f:
         data = json.load(f)
     return [date.fromisoformat(d) for d in data.get("closures", [])]
+
+
+def load_no_post_dates():
+    """投稿そのものを停止する休業日（お盆休み等）のリストを返す。
+
+    臨時休診（closures.json＝休診動画を投稿）とは異なり、
+    ここに含まれる日付は一切投稿しない（スキップして正常終了する）。
+    """
+    if not os.path.exists(NO_POST_FILE):
+        return []
+    with open(NO_POST_FILE, "r") as f:
+        data = json.load(f)
+    return [date.fromisoformat(d) for d in data.get("no_post", [])]
 
 
 def load_announcements_for(target_date):
@@ -194,6 +208,13 @@ if __name__ == "__main__":
 
     JST = timezone(timedelta(hours=9))
     today = datetime.now(JST).date()
+
+    # 休業日（お盆休み等）は一切投稿せずに正常終了する
+    no_post_dates = load_no_post_dates()
+    if today in no_post_dates:
+        print(f"[SKIP] 本日 {today}（JST）は休業日のため投稿しません。")
+        sys.exit(0)
+
     closures = load_closures()
     announcements = load_announcements_for(today)
 
