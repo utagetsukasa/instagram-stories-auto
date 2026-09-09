@@ -6,24 +6,15 @@ import requests
 import jpholiday
 from datetime import date, datetime, timedelta, timezone
 
-CLOSURES_FILE = "closures.json"
 ANNOUNCEMENTS_FILE = "announcements.json"
 NO_POST_FILE = "no_post_dates.json"
 VIDEO_EXTENSIONS = (".mp4", ".mov")
 
 
-def load_closures():
-    if not os.path.exists(CLOSURES_FILE):
-        return []
-    with open(CLOSURES_FILE, "r") as f:
-        data = json.load(f)
-    return [date.fromisoformat(d) for d in data.get("closures", [])]
-
-
 def load_no_post_dates():
     """投稿そのものを停止する休業日（お盆休み等）のリストを返す。
 
-    臨時休診（closures.json＝休診動画を投稿）とは異なり、
+    休診の告知（announcements.json＝告知を投稿する）とは異なり、
     ここに含まれる日付は一切投稿しない（スキップして正常終了する）。
     """
     if not os.path.exists(NO_POST_FILE):
@@ -89,20 +80,18 @@ def get_today_image(today):
     return day_map[today.weekday()]
 
 
-def build_plan(today, closures, announcements):
+def build_plan(today, announcements):
     """その日の投稿予定を組み立てて [(media_type, filename), ...] を返す。
 
-    優先順位:
-      1. closures に登録された日 … closure-video.mp4 のみ（全日休診）
-      2. mode="replace" の告知がある日 … 曜日画像を出さず、指定ファイルを投稿
-      3. それ以外 … 曜日/祝日画像（＋7日以内の休診予告）
-    mode="add" の告知は、上記のどのケースでも最後に追加される。
+      - mode="replace" の告知がある日 … 曜日画像を出さず、指定ファイルを投稿
+      - それ以外 … 曜日/祝日画像
+    mode="add" の告知は、どちらの場合も最後に追加される。
+
+    終日休診の告知も、当日を replace・予告日を add で表現する
+    （かつて closures.json という専用の仕組みがあったが、
+      休診日ごとに別の動画を指定できない等の制約があったため廃止した）。
     """
     plan = []
-    if today in closures:
-        plan.append(("VIDEO", "closure-video.mp4"))
-        return plan
-
     replacements = [a for a in announcements if a["mode"] == "replace"]
     additions = [a for a in announcements if a["mode"] == "add"]
 
@@ -111,10 +100,6 @@ def build_plan(today, closures, announcements):
             plan.append((media_type_of(ann["media"]), ann["media"]))
     else:
         plan.append(("IMAGE", get_today_image(today)))
-        for days_ahead in range(1, 8):
-            if today + timedelta(days=days_ahead) in closures:
-                plan.append(("VIDEO", "closure-video.mp4"))
-                break
 
     for ann in additions:
         plan.append((media_type_of(ann["media"]), ann["media"]))
@@ -272,11 +257,10 @@ if __name__ == "__main__":
         print(f"[SKIP] 本日 {today}（JST）は休業日のため投稿しません。")
         sys.exit(0)
 
-    closures = load_closures()
     announcements = load_announcements_for(today)
 
     # 本日の投稿予定リストを構築（順序が再実行時のスキップ判定にも使われる）
-    plan = build_plan(today, closures, announcements)
+    plan = build_plan(today, announcements)
 
     print(f"[DEBUG] 本日の投稿予定: {plan}")
 

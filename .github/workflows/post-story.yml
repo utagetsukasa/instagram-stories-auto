@@ -9,10 +9,10 @@ jobs:
   post-story:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2  # Node.js 24対応は v5+ が必要（2026-09-16 までに移行予定）
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 

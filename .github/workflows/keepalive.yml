@@ -19,7 +19,7 @@ jobs:
   keepalive:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.GH_PAT }}  # PATで認証 → push が "人の操作扱い" になりタイマーがリセットされる
 

@@ -1,57 +1,34 @@
 import os
-import json
 import requests
 import jpholiday
 import calendar
-from datetime import date, timedelta
+from datetime import date
 
-CLOSURES_FILE = "closures.json"
-
-WEEKDAY_LABELS = {
-    0: "monday.png",
-    1: "tuesday.png",
-    2: "wednesday.png",
-    3: "thursday.png",
-    4: "friday.png",
-    5: "saturday.png",
-    6: "sunday.png",
-}
+# 投稿予定の組み立ては post_story.py を唯一の正とする（二重実装を避けるため）
+from post_story import build_plan, load_announcements_for, load_no_post_dates
 
 WEEKDAY_JP = {
     0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"
 }
 
 
-def load_closures():
-    if not os.path.exists(CLOSURES_FILE):
-        return []
-    with open(CLOSURES_FILE, "r") as f:
-        data = json.load(f)
-    return [date.fromisoformat(d) for d in data.get("closures", [])]
+def get_post_plan(target_date, no_post_dates):
+    """その日に投稿されるファイル名を、表示用のラベルにして返す。"""
+    if target_date in no_post_dates:
+        return ["（休業日・投稿なし）"]
+
+    plan = build_plan(target_date, load_announcements_for(target_date))
+    labels = []
+    for _, filename in plan:
+        if filename == "holiday.png":
+            holiday_name = jpholiday.is_holiday_name(target_date)
+            labels.append(f"holiday.png（{holiday_name}）" if holiday_name else filename)
+        else:
+            labels.append(filename)
+    return labels
 
 
-def get_post_plan(target_date, closures):
-    if target_date in closures:
-        return ["closure-video.mp4（臨時休診日）"]
-
-    posts = []
-    holiday_name = jpholiday.is_holiday_name(target_date)
-    if holiday_name:
-        posts.append(f"holiday.png（{holiday_name}）")
-    else:
-        posts.append(WEEKDAY_LABELS[target_date.weekday()])
-
-    # 7日以内に休診日がある場合
-    for d in range(1, 8):
-        future = target_date + timedelta(days=d)
-        if future in closures:
-            posts.append(f"closure-video.mp4（休診{d}日前予告）")
-            break
-
-    return posts
-
-
-def build_issue_body(year, month, closures):
+def build_issue_body(year, month, no_post_dates):
     num_days = calendar.monthrange(year, month)[1]
     lines = [
         f"## {year}年{month}月 Instagram Stories 投稿プラン",
@@ -63,15 +40,16 @@ def build_issue_body(year, month, closures):
     for day in range(1, num_days + 1):
         d = date(year, month, day)
         weekday = WEEKDAY_JP[d.weekday()]
-        posts = get_post_plan(d, closures)
+        posts = get_post_plan(d, no_post_dates)
         content = " + ".join(posts)
         lines.append(f"| {month}/{day} | {weekday} | {content} |")
 
     lines += [
         "",
         "---",
-        f"> 臨時休診日は `closures.json` で管理されています。",
-        f"> 変更が必要な場合は `closures.json` を更新してください。",
+        "> 特定日の差し替え・追加投稿は `announcements.json` で管理されています。",
+        "> 投稿そのものを休む日は `no_post_dates.json` です。",
+        "> 設定方法は README を参照してください。",
     ]
     return "\n".join(lines)
 
@@ -99,7 +77,7 @@ if __name__ == "__main__":
     else:
         target_year, target_month = today.year, today.month + 1
 
-    closures = load_closures()
+    no_post_dates = load_no_post_dates()
     title = f"{target_year}年{target_month}月 投稿プラン"
-    body = build_issue_body(target_year, target_month, closures)
+    body = build_issue_body(target_year, target_month, no_post_dates)
     create_github_issue(title, body)
