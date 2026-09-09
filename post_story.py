@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 CLOSURES_FILE = "closures.json"
 ANNOUNCEMENTS_FILE = "announcements.json"
 NO_POST_FILE = "no_post_dates.json"
+VIDEO_EXTENSIONS = (".mp4", ".mov")
 
 
 def load_closures():
@@ -32,8 +33,20 @@ def load_no_post_dates():
     return [date.fromisoformat(d) for d in data.get("no_post", [])]
 
 
+def media_type_of(filename):
+    """拡張子から Instagram のメディア種別を判定する。"""
+    return "VIDEO" if filename.lower().endswith(VIDEO_EXTENSIONS) else "IMAGE"
+
+
 def load_announcements_for(target_date):
-    """target_date が start〜end 範囲内の announcement を返す（両端含む）"""
+    """target_date が start〜end 範囲内の announcement を返す（両端含む）
+
+    各エントリは以下のキーに正規化して返す。
+      media : 投稿するファイル名。画像(.png/.jpg)でも動画(.mp4/.mov)でもよい
+      mode  : "add"     … 曜日画像の【あとに】追加で投稿する（既定）
+              "replace" … 曜日画像を【出さずに】これを投稿する
+    旧形式（"video" キー・mode なし）もそのまま読める。
+    """
     if not os.path.exists(ANNOUNCEMENTS_FILE):
         return []
     with open(ANNOUNCEMENTS_FILE, "r") as f:
@@ -42,14 +55,26 @@ def load_announcements_for(target_date):
     for ann in data.get("announcements", []):
         start = date.fromisoformat(ann["start"])
         end = date.fromisoformat(ann["end"])
-        if start <= target_date <= end:
-            result.append(ann)
+        if not (start <= target_date <= end):
+            continue
+        media = ann.get("media") or ann.get("video")
+        if not media:
+            print(f"[WARN] media/video が指定されていないため無視します: {ann.get('label', ann)}",
+                  file=sys.stderr)
+            continue
+        mode = ann.get("mode", "add")
+        if mode not in ("add", "replace"):
+            print(f"[WARN] 不明な mode='{mode}' のため add として扱います: {ann.get('label', media)}",
+                  file=sys.stderr)
+            mode = "add"
+        entry = dict(ann)
+        entry["media"] = media
+        entry["mode"] = mode
+        result.append(entry)
     return result
 
 
-def get_today_image():
-    JST = timezone(timedelta(hours=9))
-    today = datetime.now(JST).date()
+def get_today_image(today):
     if jpholiday.is_holiday(today):
         return "holiday.png"
     day_map = {
@@ -62,6 +87,38 @@ def get_today_image():
         6: "sunday.png",
     }
     return day_map[today.weekday()]
+
+
+def build_plan(today, closures, announcements):
+    """その日の投稿予定を組み立てて [(media_type, filename), ...] を返す。
+
+    優先順位:
+      1. closures に登録された日 … closure-video.mp4 のみ（全日休診）
+      2. mode="replace" の告知がある日 … 曜日画像を出さず、指定ファイルを投稿
+      3. それ以外 … 曜日/祝日画像（＋7日以内の休診予告）
+    mode="add" の告知は、上記のどのケースでも最後に追加される。
+    """
+    plan = []
+    if today in closures:
+        plan.append(("VIDEO", "closure-video.mp4"))
+        return plan
+
+    replacements = [a for a in announcements if a["mode"] == "replace"]
+    additions = [a for a in announcements if a["mode"] == "add"]
+
+    if replacements:
+        for ann in replacements:
+            plan.append((media_type_of(ann["media"]), ann["media"]))
+    else:
+        plan.append(("IMAGE", get_today_image(today)))
+        for days_ahead in range(1, 8):
+            if today + timedelta(days=days_ahead) in closures:
+                plan.append(("VIDEO", "closure-video.mp4"))
+                break
+
+    for ann in additions:
+        plan.append((media_type_of(ann["media"]), ann["media"]))
+    return plan
 
 
 def raise_for_status_with_body(response):
@@ -219,22 +276,7 @@ if __name__ == "__main__":
     announcements = load_announcements_for(today)
 
     # 本日の投稿予定リストを構築（順序が再実行時のスキップ判定にも使われる）
-    plan = []  # [(media_type, filename), ...]
-    if today in closures:
-        # 臨時休診日: 動画のみ
-        plan.append(("VIDEO", "closure-video.mp4"))
-    else:
-        # 通常日・祝日: 曜日/祝日画像
-        plan.append(("IMAGE", get_today_image()))
-        # 7日以内に休診日がある場合は予告動画
-        for days_ahead in range(1, 8):
-            upcoming = today + timedelta(days=days_ahead)
-            if upcoming in closures:
-                plan.append(("VIDEO", "closure-video.mp4"))
-                break
-        # 期間限定告知動画（複数あれば全部）
-        for ann in announcements:
-            plan.append(("VIDEO", ann["video"]))
+    plan = build_plan(today, closures, announcements)
 
     print(f"[DEBUG] 本日の投稿予定: {plan}")
 
