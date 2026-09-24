@@ -113,6 +113,33 @@ def raise_for_status_with_body(response):
         response.raise_for_status()
 
 
+# status_code が FINISHED でも、直後の media_publish が
+# 「The media is not ready for publishing」(code 9007 / subcode 2207027) で
+# 失敗することがあるため、その場合は待って再試行する。
+PUBLISH_NOT_READY_SUBCODE = 2207027
+
+
+def publish_container(creation_id, user_id, access_token, attempts=6, wait=10):
+    publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
+    publish_params = {
+        "creation_id": creation_id,
+        "access_token": access_token,
+    }
+    for attempt in range(attempts):
+        response = requests.post(publish_url, params=publish_params)
+        if response.ok:
+            return
+        try:
+            error = response.json().get("error", {})
+        except ValueError:
+            error = {}
+        if error.get("error_subcode") != PUBLISH_NOT_READY_SUBCODE or attempt == attempts - 1:
+            break
+        print(f"公開準備待ち... ({attempt + 1}/{attempts})")
+        time.sleep(wait)
+    raise_for_status_with_body(response)
+
+
 def post_image_story(image_filename, user_id, access_token, repo):
     image_url = f"https://raw.githubusercontent.com/{repo}/main/{image_filename}"
     create_url = f"https://graph.instagram.com/v21.0/{user_id}/media"
@@ -146,13 +173,7 @@ def post_image_story(image_filename, user_id, access_token, repo):
     else:
         raise TimeoutError(f"画像処理タイムアウト: {image_filename}")
 
-    publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
-    publish_params = {
-        "creation_id": creation_id,
-        "access_token": access_token,
-    }
-    response = requests.post(publish_url, params=publish_params)
-    raise_for_status_with_body(response)
+    publish_container(creation_id, user_id, access_token)
     print(f"投稿完了（画像）: {image_filename}")
 
 
@@ -189,13 +210,7 @@ def post_video_story(video_filename, user_id, access_token, repo):
     else:
         raise TimeoutError(f"動画処理タイムアウト: {video_filename}")
 
-    publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
-    publish_params = {
-        "creation_id": creation_id,
-        "access_token": access_token,
-    }
-    response = requests.post(publish_url, params=publish_params)
-    raise_for_status_with_body(response)
+    publish_container(creation_id, user_id, access_token)
     print(f"投稿完了（動画）: {video_filename}")
 
 
