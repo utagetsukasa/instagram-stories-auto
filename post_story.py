@@ -113,6 +113,36 @@ def raise_for_status_with_body(response):
         response.raise_for_status()
 
 
+# status_code が FINISHED でも、直後の media_publish が
+# 「Media ID is not available / not ready for publishing」(subcode 2207027) で
+# 弾かれることがあるため、その場合は少し待って再試行する。
+PUBLISH_NOT_READY_SUBCODE = 2207027
+PUBLISH_MAX_ATTEMPTS = 6
+PUBLISH_RETRY_WAIT = 10
+
+
+def publish_container(creation_id, user_id, access_token):
+    publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
+    publish_params = {
+        "creation_id": creation_id,
+        "access_token": access_token,
+    }
+    for attempt in range(1, PUBLISH_MAX_ATTEMPTS + 1):
+        response = requests.post(publish_url, params=publish_params)
+        if response.ok:
+            return
+        try:
+            subcode = response.json().get("error", {}).get("error_subcode")
+        except ValueError:
+            subcode = None
+        if subcode != PUBLISH_NOT_READY_SUBCODE or attempt == PUBLISH_MAX_ATTEMPTS:
+            break
+        print(f"[WARN] メディアの公開準備ができていないため再試行します "
+              f"({attempt}/{PUBLISH_MAX_ATTEMPTS})", file=sys.stderr)
+        time.sleep(PUBLISH_RETRY_WAIT)
+    raise_for_status_with_body(response)
+
+
 def post_image_story(image_filename, user_id, access_token, repo):
     image_url = f"https://raw.githubusercontent.com/{repo}/main/{image_filename}"
     create_url = f"https://graph.instagram.com/v21.0/{user_id}/media"
@@ -146,13 +176,7 @@ def post_image_story(image_filename, user_id, access_token, repo):
     else:
         raise TimeoutError(f"画像処理タイムアウト: {image_filename}")
 
-    publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
-    publish_params = {
-        "creation_id": creation_id,
-        "access_token": access_token,
-    }
-    response = requests.post(publish_url, params=publish_params)
-    raise_for_status_with_body(response)
+    publish_container(creation_id, user_id, access_token)
     print(f"投稿完了（画像）: {image_filename}")
 
 
@@ -189,13 +213,7 @@ def post_video_story(video_filename, user_id, access_token, repo):
     else:
         raise TimeoutError(f"動画処理タイムアウト: {video_filename}")
 
-    publish_url = f"https://graph.instagram.com/v21.0/{user_id}/media_publish"
-    publish_params = {
-        "creation_id": creation_id,
-        "access_token": access_token,
-    }
-    response = requests.post(publish_url, params=publish_params)
-    raise_for_status_with_body(response)
+    publish_container(creation_id, user_id, access_token)
     print(f"投稿完了（動画）: {video_filename}")
 
 
